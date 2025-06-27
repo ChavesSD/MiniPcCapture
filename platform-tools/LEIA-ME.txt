@@ -1,0 +1,33 @@
+===============================================
+   ADB - Android Debug Bridge (Platform Tools)
+===============================================
+
+Esta pasta contém o ADB oficial do Google, necessário para
+comunicação com dispositivos Android.
+
+📁 CONTEÚDO PRINCIPAL:
+- adb.exe          -> Executável principal (Windows)
+- adb              -> Executável principal (Linux/Mac)
+- fastboot.exe     -> Ferramenta de firmware
+- *.dll            -> Bibliotecas de suporte
+
+🚀 COMO FUNCIONA:
+O software automaticamente detecta e usa este ADB local,
+eliminando a necessidade de instalar ADB no sistema.
+
+✅ VANTAGENS:
+- Não precisa instalar ADB separadamente
+- Versão sempre compatível
+- Funciona "out of the box"
+- Não interfere com outras instalações
+
+🔧 VERSÃO:
+Execute "adb version" para ver detalhes da versão.
+
+📄 LICENÇA:
+Veja NOTICE.txt para informações de licença.
+
+===============================================
+  Para mais informações sobre Platform Tools:
+  https://developer.android.com/studio/releases/platform-tools
+=============================================== 

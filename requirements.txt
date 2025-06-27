@@ -1,0 +1,8 @@
+# Requisitos para o Gravador de Tela Android
+# A aplicação usa principalmente bibliotecas padrão do Python
+
+# Para interface gráfica (já incluído no Python padrão)
+# tkinter - Interface gráfica
+ 
+# Para funcionalidades extras (opcionais)
+Pillow>=10.0.0  # Para manipulação de imagens (opcional) 

@@ -1,0 +1,12 @@
+Alterar DPI via Terminal
+
+1 Passo - Abrir o CMD dentro da pasta
+2 Passo - Copiar e Colar o Script abaixo
+
+adb shell wm density 160 && adb shell stop && adb shell start
+
+3 Passo - Se não funcionar, copiar e colar o script abaixo
+
+adb shell wm density 160
+
+4 Passo - Reiniciar o mini pc manualmente
