@@ -6,7 +6,12 @@ import subprocess
 import json
 import re
 import os
+import logging
 from typing import List, Dict, Optional, Tuple
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ADBUtils:
     """Classe com utilitários para comandos ADB"""
@@ -17,49 +22,130 @@ class ADBUtils:
     
     def setup_adb_path(self):
         """Configura o caminho para o ADB local"""
-        # Determinar o diretório do script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Caminho para platform-tools
-        platform_tools_dir = os.path.join(script_dir, "platform-tools")
-        
-        # Determinar o executável ADB baseado no OS
-        if os.name == 'nt':  # Windows
-            self.adb_path = os.path.join(platform_tools_dir, "adb.exe")
-        else:  # Linux/Mac
-            self.adb_path = os.path.join(platform_tools_dir, "adb")
-        
-        # Verificar se o arquivo existe
-        if not os.path.exists(self.adb_path):
-            # Fallback para ADB do sistema
+        try:
+            # Determinar o diretório do script usando caminho absoluto
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            logger.info(f"Diretório do script: {script_dir}")
+            
+            # Caminho absoluto para platform-tools
+            platform_tools_dir = os.path.join(script_dir, "platform-tools")
+            logger.info(f"Diretório platform-tools: {platform_tools_dir}")
+            
+            # Determinar o executável ADB baseado no OS
+            if os.name == 'nt':  # Windows
+                self.adb_path = os.path.join(platform_tools_dir, "adb.exe")
+            else:  # Linux/Mac
+                self.adb_path = os.path.join(platform_tools_dir, "adb")
+            
+            logger.info(f"Caminho do ADB: {self.adb_path}")
+            
+            # Verificar se o arquivo existe e tem permissão de execução
+            if os.path.exists(self.adb_path):
+                logger.info("ADB local encontrado")
+                # Tentar executar adb version para verificar se funciona
+                try:
+                    os.chdir(platform_tools_dir)  # Mudar para o diretório do ADB
+                    result = subprocess.run([self.adb_path, 'version'],
+                                         capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        logger.info("ADB local funcionando corretamente")
+                        self.using_local_adb = True
+                        self.platform_tools_dir = platform_tools_dir
+                    else:
+                        raise Exception(f"Erro ao executar ADB: {result.stderr}")
+                except Exception as e:
+                    logger.error(f"Erro ao testar ADB local: {e}")
+                    self.adb_path = "adb"
+                    self.using_local_adb = False
+            else:
+                logger.warning("ADB local não encontrado, usando ADB do sistema")
+                self.adb_path = "adb"
+                self.using_local_adb = False
+            
+            # Tentar iniciar o servidor ADB
+            self.restart_adb_server()
+            
+        except Exception as e:
+            logger.error(f"Erro na configuração do ADB: {e}")
             self.adb_path = "adb"
             self.using_local_adb = False
-        else:
-            self.using_local_adb = True
+    
+    def restart_adb_server(self):
+        """Reinicia o servidor ADB"""
+        try:
+            if self.using_local_adb:
+                os.chdir(self.platform_tools_dir)
+            
+            # Matar servidor existente
+            subprocess.run([self.adb_path, 'kill-server'],
+                         capture_output=True, text=True, timeout=5)
+            logger.info("Servidor ADB anterior finalizado")
+            
+            # Iniciar novo servidor
+            result = subprocess.run([self.adb_path, 'start-server'],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                logger.info("Servidor ADB iniciado com sucesso")
+            else:
+                logger.error(f"Erro ao iniciar servidor ADB: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Erro ao manipular servidor ADB: {e}")
     
     def get_adb_command(self, *args):
         """Retorna comando ADB completo com argumentos"""
-        return [self.adb_path] + list(args)
+        try:
+            if self.using_local_adb:
+                os.chdir(self.platform_tools_dir)
+            cmd = [self.adb_path] + list(args)
+            logger.debug(f"Comando ADB: {' '.join(cmd)}")
+            return cmd
+        except Exception as e:
+            logger.error(f"Erro ao gerar comando ADB: {e}")
+            return [self.adb_path] + list(args)
     
     def check_adb_available(self) -> bool:
         """Verifica se ADB está disponível no sistema"""
         try:
-            result = subprocess.run(self.get_adb_command('version'), capture_output=True, text=True, timeout=5)
-            return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            result = subprocess.run(self.get_adb_command('version'), 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                logger.info(f"ADB disponível: {result.stdout.strip()}")
+                return True
+            else:
+                logger.error(f"Erro ao verificar ADB: {result.stderr}")
+                return False
+        except FileNotFoundError:
+            logger.error("ADB não encontrado no sistema")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout ao verificar ADB")
+            return False
+        except Exception as e:
+            logger.error(f"Erro inesperado ao verificar ADB: {e}")
             return False
     
     def get_connected_devices(self) -> List[Dict[str, str]]:
         """Retorna lista de dispositivos conectados com informações detalhadas"""
         devices = []
         try:
-            result = subprocess.run(self.get_adb_command('devices', '-l'), capture_output=True, text=True, timeout=10)
+            # Verificar se ADB está disponível
+            if not self.check_adb_available():
+                logger.error("ADB não está disponível")
+                return devices
+            
+            # Listar dispositivos
+            result = subprocess.run(self.get_adb_command('devices', '-l'),
+                                  capture_output=True, text=True, timeout=10)
+            
             if result.returncode == 0:
+                logger.info(f"Saída do comando devices: {result.stdout}")
                 lines = result.stdout.strip().split('\n')[1:]  # Pular primeira linha
+                
                 for line in lines:
                     if line.strip() and '\tdevice' in line:
                         parts = line.split()
                         device_id = parts[0]
+                        logger.info(f"Dispositivo encontrado: {device_id}")
                         
                         # Obter informações adicionais
                         device_info = {
@@ -71,9 +157,13 @@ class ADBUtils:
                             'sdk': self.get_device_property(device_id, 'ro.build.version.sdk'),
                             'resolution': self.get_screen_resolution(device_id)
                         }
+                        logger.info(f"Informações do dispositivo: {device_info}")
                         devices.append(device_info)
+            else:
+                logger.error(f"Erro ao listar dispositivos: {result.stderr}")
+                
         except Exception as e:
-            print(f"Erro ao obter dispositivos: {e}")
+            logger.error(f"Erro ao obter dispositivos: {e}")
         
         return devices
     

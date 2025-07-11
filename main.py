@@ -7,9 +7,11 @@ import time
 from datetime import datetime
 import json
 import sys
+import io
+from PIL import Image, ImageTk
 
 # Informações da aplicação
-APP_NAME = "MiniPc Capture"
+APP_NAME = "Screnoid"
 APP_VERSION = "1.0.0"
 APP_AUTHOR = "Deyvison Chaves"
 
@@ -35,9 +37,11 @@ class AndroidScreenRecorder:
         
         # Variáveis de controle
         self.is_recording = False
+        self.is_mirroring = False
         self.connected_device = None
         self.recording_process = None
-        self.output_folder = os.path.expanduser("~/Desktop/MiniPcCapture")
+        self.mirroring_process = None
+        self.output_folder = os.path.expanduser("~/Desktop/Screnoid")
         
         # Criar pasta de saída se não existir
         os.makedirs(self.output_folder, exist_ok=True)
@@ -119,7 +123,7 @@ class AndroidScreenRecorder:
         title_label = ttk.Label(header_frame, text=APP_NAME, style="Header.TLabel")
         title_label.pack()
         
-        subtitle_label = ttk.Label(header_frame, text="Gravação de Tela para Mini PCs Android", 
+        subtitle_label = ttk.Label(header_frame, text="Gravação de Tela e Segunda Tela para Mini PCs Android", 
                                   font=("Segoe UI", 9), foreground="#666666")
         subtitle_label.pack(pady=(2, 0))
         
@@ -150,8 +154,23 @@ class AndroidScreenRecorder:
         self.adb_status_label = ttk.Label(connection_frame, text=adb_status, font=("Segoe UI", 7))
         self.adb_status_label.grid(row=1, column=2, padx=(10, 0), pady=(8, 0))
         
+        # === NOTEBOOK PARA ABAS ===
+        self.notebook = ttk.Notebook(main_container)
+        self.notebook.pack(fill="both", expand=True, pady=(0, 8))
+
+        # === ABA DE GRAVAÇÃO ===
+        recording_frame = ttk.Frame(self.notebook)
+        self.notebook.add(recording_frame, text="📹 Gravação")
+        self.create_recording_tab(recording_frame)
+
+        # === ABA DE SEGUNDA TELA ===
+        mirroring_frame = ttk.Frame(self.notebook)
+        self.notebook.add(mirroring_frame, text="🖥️ Segunda Tela")
+        self.create_mirroring_tab(mirroring_frame)
+
+    def create_recording_tab(self, parent):
         # === SEÇÃO DE CONFIGURAÇÕES ===
-        settings_frame = ttk.LabelFrame(main_container, text="⚙️ Configurações de Gravação", padding="8")
+        settings_frame = ttk.LabelFrame(parent, text="⚙️ Configurações de Gravação", padding="8")
         settings_frame.pack(fill="x", pady=(0, 8))
         settings_frame.columnconfigure(1, weight=1)
         
@@ -172,34 +191,27 @@ class AndroidScreenRecorder:
         ttk.Label(settings_frame, text="FPS:", font=("Segoe UI", 8)).grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
         self.fps_var = tk.StringVar(value="30")
         fps_combo = ttk.Combobox(settings_frame, textvariable=self.fps_var,
-                                values=["15", "24", "30", "60"], width=12, font=("Segoe UI", 8))
-        fps_combo.grid(row=1, column=1, sticky=tk.W, pady=(8, 0), padx=(0, 15))
+                                values=["15", "24", "30", "60"],
+                                font=("Segoe UI", 8), width=12)
+        fps_combo.grid(row=1, column=1, sticky=tk.W, pady=(8, 0))
         
-        ttk.Label(settings_frame, text="Tempo:", font=("Segoe UI", 8)).grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(8, 0))
+        ttk.Label(settings_frame, text="Tempo Máx (min):", font=("Segoe UI", 8)).grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(8, 0))
         self.max_time_var = tk.StringVar(value="3")
-        time_combo = ttk.Combobox(settings_frame, textvariable=self.max_time_var,
-                                values=["1", "2", "3", "5", "10"], width=6, font=("Segoe UI", 8))
-        time_combo.grid(row=1, column=3, sticky=tk.W, pady=(8, 0))
+        max_time_spin = ttk.Spinbox(settings_frame, from_=1, to=180, textvariable=self.max_time_var, width=6, font=("Segoe UI", 8))
+        max_time_spin.grid(row=1, column=3, sticky=tk.W, pady=(8, 0))
         
-        # Aviso sobre limite
-        limit_warning = ttk.Label(settings_frame, text="⚠️ Mini PCs limitam gravação a ~3min", 
-                                 style="Warning.TLabel", font=("Segoe UI", 7))
-        limit_warning.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
-        
-        # Pasta de saída
-        ttk.Label(settings_frame, text="Pasta:", font=("Segoe UI", 8, "bold")).grid(row=3, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
-        output_frame = ttk.Frame(settings_frame)
-        output_frame.grid(row=3, column=1, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
-        output_frame.columnconfigure(0, weight=1)
-        
+        # Linha 3: Pasta de Saída
+        ttk.Label(settings_frame, text="Pasta Saída:", font=("Segoe UI", 8)).grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
         self.output_path_var = tk.StringVar(value=self.output_folder)
-        ttk.Entry(output_frame, textvariable=self.output_path_var, state="readonly", font=("Segoe UI", 7)).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
-        ttk.Button(output_frame, text="📁", command=self.choose_output_folder).grid(row=0, column=1)
+        output_entry = ttk.Entry(settings_frame, textvariable=self.output_path_var, font=("Segoe UI", 8))
+        output_entry.grid(row=2, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=(8, 0))
+        
+        ttk.Button(settings_frame, text="📁", width=3, 
+                  command=self.choose_output_folder).grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
         
         # === SEÇÃO DE CONTROLE ===
-        control_frame = ttk.LabelFrame(main_container, text="🎬 Controle de Gravação", padding="8")
+        control_frame = ttk.LabelFrame(parent, text="🎮 Controles", padding="8")
         control_frame.pack(fill="x", pady=(0, 8))
-        control_frame.columnconfigure(0, weight=1)
         control_frame.columnconfigure(1, weight=1)
         
         # Botões principais
@@ -226,7 +238,7 @@ class AndroidScreenRecorder:
         self.time_label.grid(row=2, column=0, columnspan=2, pady=(8, 0))
         
         # === SEÇÃO DE LOG COMPACTA ===
-        log_frame = ttk.LabelFrame(main_container, text="📋 Log", padding="8")
+        log_frame = ttk.LabelFrame(parent, text="📋 Log", padding="8")
         log_frame.pack(fill="both", expand=True, pady=(0, 8))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -238,30 +250,210 @@ class AndroidScreenRecorder:
         
         # Configurar tags para cores no log
         self.log_text.tag_configure("success", foreground="#059862")
+        self.log_text.tag_configure("error", foreground="#D73A49")
         self.log_text.tag_configure("warning", foreground="#F18F01")
-        self.log_text.tag_configure("error", foreground="#C73E1D")
-        self.log_text.tag_configure("info", foreground="#2E86AB")
+        self.log_text.tag_configure("info", foreground="#0366D6")
+
+    def create_mirroring_tab(self, parent):
+        """Cria a aba de segunda tela"""
+        # === SEÇÃO DE CONFIGURAÇÕES DE SEGUNDA TELA ===
+        settings_frame = ttk.LabelFrame(parent, text="⚙️ Configurações de Segunda Tela", padding="8")
+        settings_frame.pack(fill="x", pady=(0, 8))
+        settings_frame.columnconfigure(1, weight=1)
         
-        # Botão limpar log
-        ttk.Button(log_frame, text="🗑️ Limpar", command=self.clear_log).grid(row=1, column=0, sticky=tk.E, pady=(3, 0))
+        # Linha 1: Resolução e FPS
+        ttk.Label(settings_frame, text="Resolução:", font=("Segoe UI", 8)).grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
+        self.resolution_var = tk.StringVar(value="1920x1080")
+        self.resolution_combo = ttk.Combobox(settings_frame, textvariable=self.resolution_var,
+                                           values=["1920x1080", "1280x720", "854x480"],
+                                           font=("Segoe UI", 8), width=12)
+        self.resolution_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 15))
         
-        # === FOOTER FIXO ===
-        footer_container = ttk.Frame(main_container)
-        footer_container.pack(side="bottom", fill="x", pady=(5, 0))
+        ttk.Label(settings_frame, text="FPS:", font=("Segoe UI", 8)).grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.fps_var = tk.StringVar(value="30")
+        self.fps_combo = ttk.Combobox(settings_frame, textvariable=self.fps_var,
+                                     values=["15", "30", "60"],
+                                     font=("Segoe UI", 8), width=6)
+        self.fps_combo.grid(row=0, column=3, sticky=tk.W)
         
-        # Separador do footer
-        ttk.Separator(footer_container, orient="horizontal").pack(fill="x", pady=(0, 3))
+        # Linha 2: Monitor
+        ttk.Label(settings_frame, text="Monitor:", font=("Segoe UI", 8)).grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        self.monitor_var = tk.StringVar(value="Principal")
+        self.monitor_combo = ttk.Combobox(settings_frame, textvariable=self.monitor_var,
+                                        values=["Principal", "Secundário"],
+                                        font=("Segoe UI", 8), width=12)
+        self.monitor_combo.grid(row=1, column=1, sticky=tk.W, pady=(8, 0))
         
-        # Footer frame
-        footer_frame = ttk.Frame(footer_container)
-        footer_frame.pack(fill="x")
+        # === SEÇÃO DE CONTROLES ===
+        control_frame = ttk.LabelFrame(parent, text="🎮 Controles", padding="8")
+        control_frame.pack(fill="x", pady=(0, 8))
         
-        # Informações do footer
-        version_label = ttk.Label(footer_frame, text=f"{APP_NAME} v{APP_VERSION}", style="Footer.TLabel")
-        version_label.pack(side="left")
+        # Botão de iniciar/parar
+        self.mirror_button = ttk.Button(control_frame, text="🖥️ Iniciar Segunda Tela",
+                                      command=self.toggle_mirroring, style="Accent.TButton")
+        self.mirror_button.pack(fill="x")
         
-        author_label = ttk.Label(footer_frame, text="Criado por Deyvison Chaves", style="Footer.TLabel")
-        author_label.pack(side="right")
+        # === SEÇÃO DE INSTRUÇÕES ===
+        instructions_frame = ttk.LabelFrame(parent, text="📋 Instruções", padding="8")
+        instructions_frame.pack(fill="both", expand=True)
+        
+        # Texto de instruções
+        self.instructions_text = scrolledtext.ScrolledText(instructions_frame, wrap=tk.WORD,
+                                                         font=("Segoe UI", 9), height=8)
+        self.instructions_text.pack(fill="both", expand=True)
+        
+        # Atualizar instruções iniciais
+        self.update_instructions()
+
+    def update_instructions(self):
+        """Atualiza as instruções para a segunda tela"""
+        self.instructions_text.configure(state="normal")
+        self.instructions_text.delete(1.0, tk.END)
+        
+        instructions = """Para usar a segunda tela:
+1. Selecione o monitor que deseja transmitir
+2. Clique em 'Iniciar Segunda Tela'
+3. No dispositivo Android, abra o navegador
+4. Acesse o endereço IP que aparecerá na tela
+
+Dicas:
+- Mantenha o dispositivo Android conectado à energia
+- Use rede Wi-Fi 5GHz se disponível
+- Ajuste a resolução/FPS conforme necessário"""
+        
+        self.instructions_text.insert("1.0", instructions)
+        self.instructions_text.configure(state="disabled")
+
+    def toggle_mirroring(self):
+        """Inicia ou para a segunda tela"""
+        if not self.is_mirroring:
+            self.start_mirroring()
+        else:
+            self.stop_mirroring()
+
+    def start_mirroring(self):
+        """Inicia o servidor de espelhamento"""
+        try:
+            # Obter configurações
+            resolution = self.resolution_var.get()
+            fps = self.fps_var.get()
+            monitor = self.monitor_var.get()
+            
+            # Determinar índice do monitor
+            monitor_index = 0 if monitor == "Principal" else 1
+            
+            # Preparar comando para iniciar servidor
+            server_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screen_server.py")
+            
+            # Iniciar servidor em thread separada
+            self.mirroring_process = threading.Thread(
+                target=self.mirroring_loop,
+                args=(resolution, fps),
+                daemon=True
+            )
+            self.mirroring_process.start()
+            
+            # Atualizar interface
+            self.mirror_button.configure(text="⏹️ Parar Segunda Tela")
+            self.is_mirroring = True
+            self.log_message("Segunda tela iniciada com sucesso!", "success")
+            
+            # Atualizar instruções
+            self.update_instructions()
+            
+        except Exception as e:
+            self.log_message(f"Erro ao iniciar segunda tela: {str(e)}", "error")
+            self.stop_mirroring()  # Garante que tudo seja limpo em caso de erro
+            messagebox.showerror("Erro", f"Erro ao iniciar segunda tela:\n{str(e)}")
+
+    def stop_mirroring(self):
+        """Para o servidor de segunda tela"""
+        try:
+            # Marca flag para parar
+            self.is_mirroring = False
+            
+            # Atualiza interface
+            self.mirror_button.configure(text="🖥️ Iniciar Segunda Tela")
+            self.log_message("Segunda tela encerrada", "info")
+            
+            # Se o processo ainda existe, aguarda ele terminar
+            if hasattr(self, 'mirroring_process') and self.mirroring_process:
+                self.mirroring_process.join(timeout=5)  # Aguarda até 5 segundos
+                
+                # Se ainda estiver vivo após timeout, força encerramento
+                if self.mirroring_process.is_alive():
+                    self.log_message("Aviso: Servidor não encerrou normalmente", "warning")
+                
+            # Limpa referência ao processo
+            self.mirroring_process = None
+            
+        except Exception as e:
+            self.log_message(f"Erro ao parar segunda tela: {str(e)}", "error")
+            messagebox.showerror("Erro", f"Erro ao parar segunda tela:\n{str(e)}")
+
+    def mirroring_loop(self, resolution, fps):
+        """Loop principal para o servidor de segunda tela"""
+        try:
+            import screen_server
+            import socket
+            import requests
+            import time
+            
+            # Obtém o IP local
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            
+            # Configura o monitor
+            monitor_idx = 1 if self.monitor_var.get() == "Secundário" else 0
+            
+            # Inicia o servidor Flask
+            server_thread = threading.Thread(
+                target=screen_server.app.run,
+                kwargs={'host': '0.0.0.0', 'port': 5000, 'debug': False, 'use_reloader': False}
+            )
+            server_thread.daemon = True
+            server_thread.start()
+            
+            # Aguarda o servidor iniciar (com timeout)
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                try:
+                    # Tenta acessar o servidor
+                    response = requests.get(f"http://{local_ip}:5000", timeout=1)
+                    if response.status_code == 200:
+                        break
+                except:
+                    if attempt == max_attempts - 1:
+                        raise Exception("Não foi possível iniciar o servidor")
+                    time.sleep(1)
+            
+            # Configura o monitor
+            try:
+                requests.get(f"http://{local_ip}:5000/monitor/{monitor_idx}", timeout=1)
+            except:
+                self.log_message("Aviso: Não foi possível configurar o monitor", "warning")
+            
+            # Mostra mensagem de sucesso
+            self.root.after(0, lambda: messagebox.showinfo("Servidor Iniciado", 
+                f"Servidor de streaming iniciado!\n\n" +
+                f"No dispositivo Android, acesse:\n" +
+                f"http://{local_ip}:5000"))
+            
+            # Mantém o servidor rodando
+            while self.is_mirroring:
+                time.sleep(1)
+            
+            # Tenta encerrar o servidor graciosamente
+            try:
+                requests.get(f"http://{local_ip}:5000/shutdown", timeout=1)
+            except:
+                pass
+                
+        except Exception as e:
+            self.root.after(0, lambda: self.log_message(f"Erro no servidor: {str(e)}", "error"))
+            self.root.after(0, lambda: self.stop_mirroring())
     
     def log_message(self, message, msg_type="info"):
         """Adiciona mensagem ao log com timestamp e cores"""

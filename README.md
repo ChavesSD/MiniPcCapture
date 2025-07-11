@@ -1,8 +1,8 @@
-# 📱 MiniPc Capture
+# 📱 Screnoid
 
-> **Gravação de Tela Profissional para Mini PCs Android**
+> **Gravação de Tela e Segunda Tela para Mini PCs Android**
 
-Uma aplicação desktop moderna e intuitiva para gravar a tela de mini PCs Android via ADB, com interface gráfica amigável e ADB integrado.
+Uma aplicação desktop moderna e intuitiva para gravar a tela e usar como segunda tela em mini PCs Android via ADB, com interface gráfica amigável e ADB integrado.
 
 ![Badge](https://img.shields.io/badge/Versão-1.0.0-blue)
 ![Badge](https://img.shields.io/badge/Python-3.8+-green)
@@ -18,12 +18,19 @@ Uma aplicação desktop moderna e intuitiva para gravar a tela de mini PCs Andro
 - ✅ FPS ajustável (15, 24, 30, 60)
 - ✅ Timer visual em tempo real
 
-### 🖥️ **Interface Moderna**
+### 🖥️ **Segunda Tela**
+- ✅ Use seu dispositivo Android como monitor extra
+- ✅ Resolução ajustável para melhor performance
+- ✅ FPS configurável (15-60)
+- ✅ Visualização em tempo real
+- ✅ Interface intuitiva
+
+### 🎨 **Interface Moderna**
 - ✅ Design moderno com emojis e cores
 - ✅ Detecção automática de dispositivos
 - ✅ Log colorido de atividades
 - ✅ Configurações persistentes
-- ✅ Interface responsiva com scroll
+- ✅ Interface responsiva com abas
 
 ### 🔧 **ADB Integrado**
 - ✅ ADB local incluído (sem instalação)
@@ -39,7 +46,7 @@ Uma aplicação desktop moderna e intuitiva para gravar a tela de mini PCs Andro
 
 ## 📋 Pré-requisitos
 
-### 1. Python 3.7 ou superior
+### 1. Python 3.8 ou superior
 ```bash
 python --version
 ```
@@ -70,7 +77,7 @@ install.bat
 
 ### 2. Ou instalação manual
 ```bash
-# Instalar dependências (opcional)
+# Instalar dependências
 pip install -r requirements.txt
 
 # Verificar se ADB local existe
@@ -94,16 +101,19 @@ python main.py
 - Ou configure ADB via Wi-Fi (veja seção abaixo)
 - Clique em **"Atualizar Dispositivos"**
 
-### 3. Configurar gravação
-- **Resolução**: Escolha a qualidade desejada
-- **Bitrate**: Taxa de bits (maior = melhor qualidade)
-- **FPS**: Frames por segundo
-- **Pasta de Saída**: Onde salvar os vídeos
-
-### 4. Gravar
+### 3. Gravação de Tela
+- Selecione a aba **"📹 Gravação"**
+- Configure resolução, bitrate e FPS
 - Clique em **"🔴 Iniciar Gravação"**
 - O timer mostrará o tempo decorrido
 - Clique em **"⏹️ Parar Gravação"** para finalizar
+
+### 4. Segunda Tela
+- Selecione a aba **"🖥️ Segunda Tela"**
+- Configure resolução e FPS desejados
+- Clique em **"🖥️ Iniciar Segunda Tela"**
+- A tela do dispositivo será exibida em tempo real
+- Clique em **"⏹️ Parar Segunda Tela"** para finalizar
 
 ## 📶 Conexão ADB via Wi-Fi
 
@@ -157,10 +167,16 @@ sudo adb devices
 - Tentar resolução menor
 - Verificar se outro app não está usando a tela
 
+### Segunda tela lenta
+- Reduzir resolução
+- Diminuir FPS
+- Verificar conexão USB/Wi-Fi
+- Fechar apps em segundo plano no dispositivo
+
 ## 📁 Estrutura de Arquivos
 
 ```
-Gravar Tela MiniPC/
+Screnoid/
 ├── main.py              # Aplicação principal
 ├── adb_utils.py         # Utilitários ADB
 ├── requirements.txt     # Dependências
@@ -186,12 +202,16 @@ adb pull /sdcard/screen.mp4 ./gravacao.mp4
 
 # Remover do dispositivo
 adb shell rm /sdcard/screen.mp4
+
+# Capturar screenshot
+adb shell screencap -p /sdcard/screenshot.png
 ```
 
 ### Personalizações no código
 - Modificar resoluções disponíveis na linha 67
 - Alterar bitrates máximos na linha 75
 - Configurar pasta padrão na linha 20
+- Ajustar FPS da segunda tela na linha 120
 
 ## 🔒 Segurança
 

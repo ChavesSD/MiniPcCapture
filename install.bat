@@ -9,7 +9,7 @@ python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERRO: Python não está instalado!
     echo.
-    echo Por favor, instale Python 3.7+ em:
+    echo Por favor, instale Python 3.8+ em:
     echo https://www.python.org/downloads/
     echo.
     pause
@@ -76,7 +76,7 @@ if exist "platform-tools\adb.exe" (
 echo.
 
 :: Instalar dependências
-echo Instalando dependências opcionais...
+echo Instalando dependências...
 pip install -r requirements.txt
 
 :: Verificar instalação
@@ -100,12 +100,19 @@ if exist "platform-tools\adb.exe" (
     )
 )
 
-:: Testar Python
+:: Testar Python e dependências
 python -c "import tkinter" >nul 2>&1
 if %errorlevel% equ 0 (
     echo ✓ Interface gráfica (tkinter) disponível
 ) else (
     echo ⚠ Problema com interface gráfica
+)
+
+python -c "import PIL" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✓ Pillow (PIL) instalado
+) else (
+    echo ⚠ Problema com Pillow (PIL)
 )
 
 echo.
