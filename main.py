@@ -9,6 +9,209 @@ import json
 import sys
 import io
 from PIL import Image, ImageTk
+import ctypes
+import win32api
+import win32con
+import socket
+import requests
+from ctypes import windll, Structure, c_long, byref, c_int, c_ulong, POINTER, sizeof, c_ushort, c_short
+
+# Estruturas para configuração de monitor
+class POINTL(Structure):
+    _fields_ = [("x", c_long), ("y", c_long)]
+
+class DEVMODE(Structure):
+    _fields_ = [
+        ('dmDeviceName', c_int * 32),
+        ('dmSpecVersion', c_ushort),
+        ('dmDriverVersion', c_ushort),
+        ('dmSize', c_ushort),
+        ('dmDriverExtra', c_ushort),
+        ('dmFields', c_ulong),
+        ('union1', POINTL),
+        ('dmColor', c_short),
+        ('dmDuplex', c_short),
+        ('dmYResolution', c_short),
+        ('dmTTOption', c_short),
+        ('dmCollate', c_short),
+        ('dmFormName', c_int * 32),
+        ('dmLogPixels', c_ushort),
+        ('dmBitsPerPel', c_ulong),
+        ('dmPelsWidth', c_ulong),
+        ('dmPelsHeight', c_ulong),
+        ('dmDisplayFlags', c_ulong),
+        ('dmDisplayFrequency', c_ulong),
+        ('dmICMMethod', c_ulong),
+        ('dmICMIntent', c_ulong),
+        ('dmMediaType', c_ulong),
+        ('dmDitherType', c_ulong),
+        ('dmReserved1', c_ulong),
+        ('dmReserved2', c_ulong),
+        ('dmPanningWidth', c_ulong),
+        ('dmPanningHeight', c_ulong),
+    ]
+
+def is_admin():
+    """Verifica se o programa está rodando como administrador"""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def setup_virtual_monitor():
+    """Configura o monitor virtual usando o driver USBMMIDD"""
+    if not is_admin():
+        messagebox.showerror("Erro", "Este programa precisa ser executado como Administrador para configurar o monitor virtual.")
+        return False
+        
+    try:
+        # Caminho para o diretório do driver
+        driver_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usbmmidd_v2")
+        
+        # Determina qual versão do instalador usar (32 ou 64 bits)
+        installer = "deviceinstaller64.exe" if sys.maxsize > 2**32 else "deviceinstaller.exe"
+        installer_path = os.path.join(driver_dir, installer)
+        
+        # Primeiro, tenta remover qualquer instalação anterior
+        subprocess.run(f'"{installer_path}" stop usbmmidd', 
+                      cwd=driver_dir, capture_output=True, text=True, shell=True)
+        subprocess.run(f'"{installer_path}" remove usbmmidd', 
+                      cwd=driver_dir, capture_output=True, text=True, shell=True)
+        
+        # Instala o driver
+        install_cmd = f'"{installer_path}" install usbmmidd.inf usbmmidd'
+        result = subprocess.run(install_cmd, cwd=driver_dir, capture_output=True, text=True, shell=True)
+        
+        if result.returncode != 0 and "already installed" not in result.stdout.lower():
+            raise Exception(f"Erro ao instalar driver: {result.stdout}\n{result.stderr}")
+        
+        # Desativa qualquer monitor virtual existente
+        disable_cmd = f'"{installer_path}" enableidd 0'
+        subprocess.run(disable_cmd, cwd=driver_dir, capture_output=True, text=True, shell=True)
+        time.sleep(2)  # Aguarda a desativação
+        
+        # Ativa o monitor virtual
+        enable_cmd = f'"{installer_path}" enableidd 1'
+        result = subprocess.run(enable_cmd, cwd=driver_dir, capture_output=True, text=True, shell=True)
+        
+        if result.returncode != 0:
+            raise Exception(f"Erro ao ativar monitor: {result.stdout}\n{result.stderr}")
+        
+        # Aguarda o Windows detectar o novo monitor
+        time.sleep(3)
+        
+        # Configura o modo de exibição estendido
+        try:
+            # Obtém informações dos monitores
+            device0 = win32api.EnumDisplayDevices(None, 0, 0)  # Monitor principal
+            device1 = win32api.EnumDisplayDevices(None, 1, 0)  # Monitor virtual
+            
+            if not device1:
+                raise Exception("Monitor virtual não detectado")
+                
+            settings0 = win32api.EnumDisplaySettings(device0.DeviceName, win32con.ENUM_CURRENT_SETTINGS)
+            settings1 = win32api.EnumDisplaySettings(device1.DeviceName, win32con.ENUM_CURRENT_SETTINGS)
+            
+            # Configura o monitor principal
+            devmode0 = DEVMODE()
+            devmode0.dmSize = sizeof(DEVMODE)
+            devmode0.dmDriverExtra = 0
+            devmode0.dmFields = (win32con.DM_POSITION | win32con.DM_PELSWIDTH | 
+                               win32con.DM_PELSHEIGHT | win32con.DM_BITSPERPEL)
+            devmode0.dmPelsWidth = settings0.PelsWidth
+            devmode0.dmPelsHeight = settings0.PelsHeight
+            devmode0.dmBitsPerPel = settings0.BitsPerPel
+            devmode0.union1.x = 0
+            devmode0.union1.y = 0
+            
+            # Aplica configurações ao monitor principal
+            result = windll.user32.ChangeDisplaySettingsExW(
+                device0.DeviceName,
+                byref(devmode0),
+                None,
+                win32con.CDS_UPDATEREGISTRY | win32con.CDS_NORESET,
+                None
+            )
+            
+            if result != win32con.DISP_CHANGE_SUCCESSFUL:
+                print(f"Aviso: Erro ao configurar monitor principal: {result}")
+            
+            time.sleep(1)
+            
+            # Configura o monitor virtual
+            devmode1 = DEVMODE()
+            devmode1.dmSize = sizeof(DEVMODE)
+            devmode1.dmDriverExtra = 0
+            devmode1.dmFields = (win32con.DM_POSITION | win32con.DM_PELSWIDTH | 
+                               win32con.DM_PELSHEIGHT | win32con.DM_BITSPERPEL)
+            devmode1.dmPelsWidth = 1920
+            devmode1.dmPelsHeight = 1080
+            devmode1.dmBitsPerPel = settings0.BitsPerPel
+            devmode1.union1.x = settings0.PelsWidth  # Posiciona à direita do monitor principal
+            devmode1.union1.y = 0
+            
+            # Aplica configurações ao monitor virtual
+            result = windll.user32.ChangeDisplaySettingsExW(
+                device1.DeviceName,
+                byref(devmode1),
+                None,
+                win32con.CDS_UPDATEREGISTRY | win32con.CDS_NORESET,
+                None
+            )
+            
+            if result != win32con.DISP_CHANGE_SUCCESSFUL:
+                raise Exception(f"Erro ao configurar monitor virtual: {result}")
+            
+            # Aplica todas as mudanças
+            result = windll.user32.ChangeDisplaySettingsW(None, 0)
+            if result != win32con.DISP_CHANGE_SUCCESSFUL:
+                raise Exception(f"Erro ao aplicar mudanças: {result}")
+            
+            # Aguarda as configurações serem aplicadas
+            time.sleep(2)
+            
+            # Mostra mensagem para o usuário
+            messagebox.showinfo("Configuração de Monitor", 
+                "Monitor virtual configurado!\n\n"
+                "Para ajustar o modo de exibição:\n\n"
+                "1. Pressione Windows + P\n"
+                "2. Selecione uma das opções:\n"
+                "   - PC Screen only: Apenas monitor principal\n"
+                "   - Duplicate: Duplicar telas\n"
+                "   - Extend: Estender telas (recomendado)\n"
+                "   - Second screen only: Apenas segunda tela\n\n"
+                "3. Aguarde alguns segundos para o Windows aplicar a configuração")
+            
+        except Exception as e:
+            print(f"Aviso: Erro ao configurar modo de exibição: {e}")
+            # Continua mesmo com erro, pois algumas configurações podem ter funcionado
+        
+        return True
+        
+    except Exception as e:
+        messagebox.showerror("Erro", f"Erro ao configurar monitor virtual:\n{str(e)}")
+        return False
+
+def disable_virtual_monitor():
+    """Desativa o monitor virtual"""
+    try:
+        driver_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usbmmidd_v2")
+        installer = "deviceinstaller64.exe" if sys.maxsize > 2**32 else "deviceinstaller.exe"
+        installer_path = os.path.join(driver_dir, installer)
+        
+        # Desativa o monitor
+        disable_cmd = f'"{installer_path}" enableidd 0'
+        subprocess.run(disable_cmd, cwd=driver_dir, capture_output=True, text=True, shell=True)
+        time.sleep(2)  # Aguarda a desativação
+        
+        # Remove o driver
+        subprocess.run(f'"{installer_path}" stop usbmmidd', 
+                      cwd=driver_dir, capture_output=True, text=True, shell=True)
+        subprocess.run(f'"{installer_path}" remove usbmmidd', 
+                      cwd=driver_dir, capture_output=True, text=True, shell=True)
+        
+    except Exception as e:
+        print(f"Erro ao desativar monitor virtual: {e}")
 
 # Informações da aplicação
 APP_NAME = "Screnoid"
@@ -310,8 +513,10 @@ class AndroidScreenRecorder:
         self.instructions_text.configure(state="normal")
         self.instructions_text.delete(1.0, tk.END)
         
-        instructions = """Para usar a segunda tela:
-1. Selecione o monitor que deseja transmitir
+        monitor = self.monitor_var.get()
+        if monitor == "Principal":
+            instructions = """Para usar a segunda tela (Monitor Principal):
+1. Selecione 'Principal' como monitor
 2. Clique em 'Iniciar Segunda Tela'
 3. No dispositivo Android, abra o navegador
 4. Acesse o endereço IP que aparecerá na tela
@@ -320,6 +525,22 @@ Dicas:
 - Mantenha o dispositivo Android conectado à energia
 - Use rede Wi-Fi 5GHz se disponível
 - Ajuste a resolução/FPS conforme necessário"""
+        else:
+            instructions = """Para usar a segunda tela (Monitor Virtual):
+1. Selecione 'Secundário' como monitor
+2. Execute o programa como Administrador
+3. Clique em 'Iniciar Segunda Tela'
+4. Quando aparecer o aviso do Windows Defender, clique em 'Permitir acesso'
+5. Pressione Windows + P e selecione 'Estender'
+6. No dispositivo Android, abra o navegador e acesse o IP mostrado
+
+Dicas:
+- O monitor virtual permite usar o Android como uma extensão da sua tela
+- Se a tela estiver duplicada, use Windows + P > Estender
+- Para ajustar a posição do monitor virtual:
+  * Clique direito na área de trabalho
+  * Configurações de exibição
+  * Arraste o monitor 2 para a posição desejada"""
         
         self.instructions_text.insert("1.0", instructions)
         self.instructions_text.configure(state="disabled")
@@ -332,129 +553,114 @@ Dicas:
             self.stop_mirroring()
 
     def start_mirroring(self):
-        """Inicia o servidor de espelhamento"""
+        """Inicia o servidor de segunda tela"""
         try:
-            # Obter configurações
-            resolution = self.resolution_var.get()
-            fps = self.fps_var.get()
-            monitor = self.monitor_var.get()
+            # Configura monitor virtual se necessário
+            if self.monitor_var.get() == "Secundário":
+                self.log_message("Configurando monitor virtual...")
+                if not setup_virtual_monitor():
+                    return
+                
+                # Mostra instruções para configurar modo estendido
+                messagebox.showinfo("Monitor Virtual", 
+                    "Monitor virtual configurado!\n\n"
+                    "Para garantir que a tela esteja no modo estendido:\n\n"
+                    "1. Pressione Windows + P\n"
+                    "2. Selecione 'Estender'\n"
+                    "3. Aguarde alguns segundos para o Windows configurar o monitor")
             
-            # Determinar índice do monitor
-            monitor_index = 0 if monitor == "Principal" else 1
+            # Determina o índice do monitor
+            monitor_index = 1 if self.monitor_var.get() == "Secundário" else 0
             
-            # Preparar comando para iniciar servidor
-            server_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screen_server.py")
-            
-            # Iniciar servidor em thread separada
-            self.mirroring_process = threading.Thread(
+            # Inicia o servidor em uma thread separada
+            self.server_thread = threading.Thread(
                 target=self.mirroring_loop,
-                args=(resolution, fps),
+                args=(self.resolution_var.get(), self.fps_var.get(), monitor_index),
                 daemon=True
             )
-            self.mirroring_process.start()
+            self.server_thread.start()
             
-            # Atualizar interface
-            self.mirror_button.configure(text="⏹️ Parar Segunda Tela")
+            # Atualiza a interface
             self.is_mirroring = True
-            self.log_message("Segunda tela iniciada com sucesso!", "success")
-            
-            # Atualizar instruções
-            self.update_instructions()
+            self.mirror_button.configure(text="⏹️ Parar Segunda Tela", style="")
+            self.log_message("Segunda tela iniciada!", "success")
             
         except Exception as e:
-            self.log_message(f"Erro ao iniciar segunda tela: {str(e)}", "error")
-            self.stop_mirroring()  # Garante que tudo seja limpo em caso de erro
+            self.log_message(f"Erro ao iniciar segunda tela: {e}", "error")
             messagebox.showerror("Erro", f"Erro ao iniciar segunda tela:\n{str(e)}")
+
+    def mirroring_loop(self, resolution, fps, monitor_index):
+        """Loop principal do servidor de segunda tela"""
+        try:
+            # Obtém o IP da máquina
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            
+            # Mostra o IP para o usuário
+            self.log_message(f"Acesse no navegador do Android: http://{local_ip}:5000", "info")
+            
+            # Inicia o servidor Flask em um processo separado
+            server_script = os.path.join(os.path.dirname(__file__), "screen_server.py")
+            self.server_process = subprocess.Popen(
+                [sys.executable, server_script, str(monitor_index)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            # Aguarda o processo terminar
+            while self.server_process.poll() is None:
+                time.sleep(0.1)
+                
+            # Verifica se houve erro
+            if self.server_process.returncode != 0:
+                error = self.server_process.stderr.read().decode()
+                self.log_message(f"Erro no servidor: {error}", "error")
+                
+        except Exception as e:
+            self.log_message(f"Erro no loop de segunda tela: {e}", "error")
+        finally:
+            self.stop_mirroring()
 
     def stop_mirroring(self):
         """Para o servidor de segunda tela"""
         try:
-            # Marca flag para parar
-            self.is_mirroring = False
-            
-            # Atualiza interface
-            self.mirror_button.configure(text="🖥️ Iniciar Segunda Tela")
-            self.log_message("Segunda tela encerrada", "info")
-            
-            # Se o processo ainda existe, aguarda ele terminar
-            if hasattr(self, 'mirroring_process') and self.mirroring_process:
-                self.mirroring_process.join(timeout=5)  # Aguarda até 5 segundos
-                
-                # Se ainda estiver vivo após timeout, força encerramento
-                if self.mirroring_process.is_alive():
-                    self.log_message("Aviso: Servidor não encerrou normalmente", "warning")
-                
-            # Limpa referência ao processo
-            self.mirroring_process = None
-            
-        except Exception as e:
-            self.log_message(f"Erro ao parar segunda tela: {str(e)}", "error")
-            messagebox.showerror("Erro", f"Erro ao parar segunda tela:\n{str(e)}")
-
-    def mirroring_loop(self, resolution, fps):
-        """Loop principal para o servidor de segunda tela"""
-        try:
-            import screen_server
-            import socket
-            import requests
-            import time
-            
-            # Obtém o IP local
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-            
-            # Configura o monitor
-            monitor_idx = 1 if self.monitor_var.get() == "Secundário" else 0
-            
-            # Inicia o servidor Flask
-            server_thread = threading.Thread(
-                target=screen_server.app.run,
-                kwargs={'host': '0.0.0.0', 'port': 5000, 'debug': False, 'use_reloader': False}
-            )
-            server_thread.daemon = True
-            server_thread.start()
-            
-            # Aguarda o servidor iniciar (com timeout)
-            max_attempts = 5
-            for attempt in range(max_attempts):
-                try:
-                    # Tenta acessar o servidor
-                    response = requests.get(f"http://{local_ip}:5000", timeout=1)
-                    if response.status_code == 200:
-                        break
-                except:
-                    if attempt == max_attempts - 1:
-                        raise Exception("Não foi possível iniciar o servidor")
-                    time.sleep(1)
-            
-            # Configura o monitor
-            try:
-                requests.get(f"http://{local_ip}:5000/monitor/{monitor_idx}", timeout=1)
-            except:
-                self.log_message("Aviso: Não foi possível configurar o monitor", "warning")
-            
-            # Mostra mensagem de sucesso
-            self.root.after(0, lambda: messagebox.showinfo("Servidor Iniciado", 
-                f"Servidor de streaming iniciado!\n\n" +
-                f"No dispositivo Android, acesse:\n" +
-                f"http://{local_ip}:5000"))
-            
-            # Mantém o servidor rodando
-            while self.is_mirroring:
-                time.sleep(1)
-            
             # Tenta encerrar o servidor graciosamente
-            try:
-                requests.get(f"http://{local_ip}:5000/shutdown", timeout=1)
-            except:
-                pass
+            if hasattr(self, 'server_process') and self.server_process:
+                try:
+                    # Tenta fazer uma requisição de shutdown
+                    requests.post('http://localhost:5000/shutdown', timeout=1)
+                except:
+                    pass
                 
+                # Aguarda um pouco para o servidor encerrar
+                time.sleep(1)
+                
+                # Se ainda estiver rodando, força o encerramento
+                if self.server_process.poll() is None:
+                    self.server_process.terminate()
+                    self.server_process.wait(timeout=5)
+                
+                self.server_process = None
+            
+            # Desativa o monitor virtual se necessário
+            if self.monitor_var.get() == "Secundário":
+                self.log_message("Desativando monitor virtual...")
+                disable_virtual_monitor()
+            
+            # Atualiza a interface
+            self.is_mirroring = False
+            self.mirror_button.configure(text="🖥️ Iniciar Segunda Tela", style="Accent.TButton")
+            self.log_message("Segunda tela encerrada!", "success")
+            
         except Exception as e:
-            self.root.after(0, lambda: self.log_message(f"Erro no servidor: {str(e)}", "error"))
-            self.root.after(0, lambda: self.stop_mirroring())
-    
+            self.log_message(f"Erro ao parar segunda tela: {e}", "error")
+            messagebox.showerror("Erro", f"Erro ao parar segunda tela:\n{str(e)}")
+        finally:
+            # Garante que a interface seja atualizada
+            self.is_mirroring = False
+            self.mirror_button.configure(text="🖥️ Iniciar Segunda Tela", style="Accent.TButton")
+
     def log_message(self, message, msg_type="info"):
         """Adiciona mensagem ao log com timestamp e cores"""
         timestamp = datetime.now().strftime("%H:%M:%S")
