@@ -1,13 +1,10 @@
 # Requisitos para o Gravador de Tela Android
-# A aplicação usa principalmente bibliotecas padrão do Python
 
-# Para interface gráfica (já incluído no Python padrão)
-# tkinter - Interface gráfica
- 
+# Interface gráfica moderna com Qt
+PySide6>=6.6.0  # Framework Qt para Python
+
 # Para funcionalidades extras
 Pillow>=10.0.0  # Para manipulação de imagens
-
-# Para captura de tela do PC
 mss>=9.0.1  # Captura de tela eficiente
 flask>=3.0.0  # Servidor web para streaming
 requests>=2.31.0  # Para comunicação HTTP 
