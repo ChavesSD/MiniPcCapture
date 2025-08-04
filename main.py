@@ -440,22 +440,14 @@ class AndroidScreenRecorder(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setSpacing(10)
-        
-        # Remover instruções
-        # Instruções (REMOVIDO)
-        # instructions_group = QGroupBox("ℹ️ Instruções")
-        # instructions_layout = QVBoxLayout(instructions_group)
-        # self.instructions_label = QLabel()
-        # self.instructions_label.setWordWrap(True)
-        # self.instructions_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
-        # instructions_layout.addWidget(self.instructions_label)
-        # layout.addWidget(instructions_group)
 
         # Configurações em linha única
         settings_group = QGroupBox("⚙️ Configurações")
-        settings_layout = QHBoxLayout(settings_group)
+        settings_layout = QVBoxLayout(settings_group)
         settings_layout.setSpacing(18)
 
+        # Primeira linha: Resolução e FPS
+        row1_layout = QHBoxLayout()
         resolution_label = QLabel("Resolução:")
         self.mirror_resolution_combo = QComboBox()
         self.mirror_resolution_combo.addItems(["1920x1080", "1280x720", "854x480", "640x360"])
@@ -464,12 +456,29 @@ class AndroidScreenRecorder(QMainWindow):
         self.mirror_fps_combo = QComboBox()
         self.mirror_fps_combo.addItems(["60", "30", "24", "15"])
 
-        settings_layout.addWidget(resolution_label)
-        settings_layout.addWidget(self.mirror_resolution_combo)
-        settings_layout.addSpacing(12)
-        settings_layout.addWidget(fps_label)
-        settings_layout.addWidget(self.mirror_fps_combo)
-        settings_layout.addStretch(1)
+        row1_layout.addWidget(resolution_label)
+        row1_layout.addWidget(self.mirror_resolution_combo)
+        row1_layout.addSpacing(12)
+        row1_layout.addWidget(fps_label)
+        row1_layout.addWidget(self.mirror_fps_combo)
+        row1_layout.addStretch(1)
+        settings_layout.addLayout(row1_layout)
+
+        # Segunda linha: Modo de operação
+        row2_layout = QHBoxLayout()
+        mode_label = QLabel("Modo:")
+        self.mirror_mode_combo = QComboBox()
+        self.mirror_mode_combo.addItems([
+            "📱 Android → PC (Espelhar Android)",
+            "🖥️ PC → Android (Espelhar PC)",
+            "📺 Estender Monitor"
+        ])
+        self.mirror_mode_combo.currentIndexChanged.connect(self.on_mirror_mode_changed)
+
+        row2_layout.addWidget(mode_label)
+        row2_layout.addWidget(self.mirror_mode_combo, stretch=1)
+        settings_layout.addLayout(row2_layout)
+
         layout.addWidget(settings_group)
         
         # Controles
@@ -493,11 +502,18 @@ class AndroidScreenRecorder(QMainWindow):
         
         layout.addWidget(control_group)
         
-        # Status
+        # Status e instruções
         self.mirror_status_label = QLabel()
         self.mirror_status_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
         self.mirror_status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.mirror_status_label)
+
+        # Log específico para Segunda Tela
+        log_group = QGroupBox("📋 Log")
+        log_layout = QVBoxLayout(log_group)
+        self.mirror_log = LogWidget()
+        log_layout.addWidget(self.mirror_log)
+        layout.addWidget(log_group)
         
         layout.addStretch()
         return tab
@@ -533,15 +549,14 @@ class AndroidScreenRecorder(QMainWindow):
         layout.addStretch(1)
         return tab
 
-    def update_instructions(self):
-        instructions = """
-        1. Certifique-se que o dispositivo está conectado e autorizado
-        2. Selecione a resolução e FPS desejados
-        3. Clique em "Iniciar Segunda Tela"
-        4. Uma janela do navegador abrirá com a tela do dispositivo
-        5. Para parar, clique em "Parar Segunda Tela"
-        """
-        self.instructions_label.setText(instructions.strip())
+    def on_mirror_mode_changed(self, index):
+        # Atualiza o texto do botão e instruções baseado no modo
+        mode_texts = [
+            "🖥️ Iniciar Espelhamento",
+            "📱 Iniciar Espelhamento Reverso",
+            "📺 Iniciar Modo Extensão"
+        ]
+        self.mirror_button.setText(mode_texts[index])
 
     def toggle_mirroring(self):
         if not self.is_mirroring:
@@ -549,39 +564,218 @@ class AndroidScreenRecorder(QMainWindow):
         else:
             self.stop_mirroring()
 
+    def setup_virtual_display(self):
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            usbmmidd_dir = os.path.join(base_dir, "usbmmidd_v2")
+            
+            # Instalar/Atualizar driver
+            subprocess.run([
+                os.path.join(usbmmidd_dir, "deviceinstaller64.exe"),
+                "install",
+                os.path.join(usbmmidd_dir, "usbmmidd.inf"),
+                "USB\\Vid_0547&Pid_1002"
+            ], check=True)
+            
+            # Criar monitor virtual
+            subprocess.run([
+                os.path.join(usbmmidd_dir, "deviceinstaller64.exe"),
+                "enableidd", "1"
+            ], check=True)
+
+            self.mirror_log.log_message("Monitor virtual criado com sucesso!", "success")
+            return True
+        except Exception as e:
+            self.mirror_log.log_message(f"Erro ao criar monitor virtual: {e}", "error")
+            return False
+
+    def remove_virtual_display(self):
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            usbmmidd_dir = os.path.join(base_dir, "usbmmidd_v2")
+            
+            # Remover monitor virtual
+            subprocess.run([
+                os.path.join(usbmmidd_dir, "deviceinstaller64.exe"),
+                "enableidd", "0"
+            ], check=True)
+
+            self.mirror_log.log_message("Monitor virtual removido com sucesso!", "success")
+        except Exception as e:
+            self.mirror_log.log_message(f"Erro ao remover monitor virtual: {e}", "error")
+
     def start_mirroring(self):
         if not self.connected_device:
             QMessageBox.warning(self, "Erro", "Nenhum dispositivo conectado!")
             return
+
+        # Verificar se o ADB está funcionando
+        try:
+            adb_version = subprocess.run(
+                [self.adb_path, "version"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            self.mirror_log.log_message(f"ADB versão: {adb_version.stdout.strip()}", "info")
+            
+            # Verificar status do dispositivo
+            adb_devices = subprocess.run(
+                [self.adb_path, "devices"], 
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            self.mirror_log.log_message(f"Dispositivos ADB: {adb_devices.stdout.strip()}", "info")
+            
+            if self.connected_device not in adb_devices.stdout:
+                raise Exception("Dispositivo não encontrado ou não autorizado")
+            
+            # Verificar se o dispositivo está respondendo
+            state = subprocess.run(
+                [self.adb_path, "-s", self.connected_device, "get-state"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            self.mirror_log.log_message(f"Estado do dispositivo: {state.stdout.strip()}", "info")
+            
+        except Exception as e:
+            self.mirror_log.log_message(f"Erro ao verificar ADB: {str(e)}", "error")
+            QMessageBox.critical(self, "Erro", "Falha ao inicializar ADB. Verifique se o dispositivo está conectado e autorizado.")
+            return
+
+        # Verificar pasta do scrcpy
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        scrcpy_dir = os.path.join(base_dir, "scrcpy")
+        scrcpy_exe = os.path.join(scrcpy_dir, "scrcpy.exe") if os.name == "nt" else os.path.join(scrcpy_dir, "scrcpy")
+        scrcpy_server = os.path.join(scrcpy_dir, "scrcpy-server")
         
-        resolution = self.mirror_resolution_combo.currentText()
-        fps = self.mirror_fps_combo.currentText()
-        
-        self.is_mirroring = True
-        self.mirror_button.setText("⏹️ Parar Segunda Tela")
-        self.mirror_button.setStyleSheet("""
-            QPushButton {
-                background-color: #C73E1D;
-            }
-            QPushButton:hover {
-                background-color: #A93315;
-            }
-        """)
-        
-        # Iniciar thread de espelhamento
-        self.mirror_thread = threading.Thread(target=self.mirroring_loop, args=(resolution, fps))
-        self.mirror_thread.daemon = True
-        self.mirror_thread.start()
+        # Verificar arquivos necessários
+        if not os.path.exists(scrcpy_exe):
+            QMessageBox.critical(self, "Erro", "scrcpy.exe não encontrado na pasta local")
+            return
+            
+        if not os.path.exists(scrcpy_server):
+            QMessageBox.critical(self, "Erro", "scrcpy-server não encontrado na pasta local")
+            return
+
+        try:
+            # Primeiro, vamos tentar enviar o servidor para o dispositivo
+            self.mirror_log.log_message("Enviando servidor scrcpy para o dispositivo...", "info")
+            push_result = subprocess.run(
+                [self.adb_path, "-s", self.connected_device, "push", scrcpy_server, "/data/local/tmp/scrcpy-server"],
+                capture_output=True,
+                text=True
+            )
+            if push_result.returncode != 0:
+                raise Exception(f"Erro ao enviar servidor: {push_result.stderr}")
+            
+            # Dar permissão de execução ao servidor
+            subprocess.run(
+                [self.adb_path, "-s", self.connected_device, "shell", "chmod 777 /data/local/tmp/scrcpy-server"],
+                check=True
+            )
+
+            # Configuração básica do scrcpy
+            cmd = [
+                scrcpy_exe,
+                "-s", self.connected_device,
+                "--no-audio",
+                "-v"
+            ]
+            
+            self.mirror_log.log_message(f"Executando comando: {' '.join(cmd)}", "info")
+            
+            # Iniciar processo com captura de saída
+            self.mirroring_process = subprocess.Popen(
+                cmd,
+                cwd=scrcpy_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            # Criar threads para monitorar a saída em tempo real
+            def monitor_output(pipe, log_type):
+                try:
+                    for line in pipe:
+                        line = line.strip()
+                        if line:  # Só registrar linhas não vazias
+                            self.mirror_log.log_message(line, log_type)
+                            
+                            # Verificar por mensagens específicas de erro
+                            if "ERROR:" in line:
+                                self.mirror_log.log_message(f"Erro detectado: {line}", "error")
+                                self.stop_mirroring()
+                except Exception as e:
+                    self.mirror_log.log_message(f"Erro ao monitorar saída: {str(e)}", "error")
+
+            # Iniciar threads de monitoramento
+            stdout_thread = threading.Thread(target=monitor_output, args=(self.mirroring_process.stdout, "info"), daemon=True)
+            stderr_thread = threading.Thread(target=monitor_output, args=(self.mirroring_process.stderr, "error"), daemon=True)
+            
+            stdout_thread.start()
+            stderr_thread.start()
+
+            self.is_mirroring = True
+            self.mirror_button.setText("⏹️ Parar")
+            self.mirror_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #C73E1D;
+                }
+                QPushButton:hover {
+                    background-color: #A93315;
+                }
+            """)
+            
+            # Aguardar um pouco para ver se o processo inicia corretamente
+            time.sleep(2)
+            
+            if self.mirroring_process.poll() is not None:
+                # Coletar toda a saída disponível
+                stdout, stderr = self.mirroring_process.communicate()
+                exit_code = self.mirroring_process.poll()
+                
+                error_msg = stderr.strip() if stderr else stdout.strip()
+                if not error_msg:
+                    error_msg = "Nenhuma mensagem de erro disponível"
+                
+                if exit_code != 0:
+                    raise Exception(f"Processo terminou com código {exit_code}. Erro: {error_msg}")
+                else:
+                    self.mirror_log.log_message("Processo encerrado normalmente", "info")
+            else:
+                self.mirror_log.log_message("scrcpy iniciado com sucesso!", "success")
+                
+        except FileNotFoundError:
+            QMessageBox.critical(self, "scrcpy não encontrado", "O programa scrcpy não está instalado nem na pasta local nem no PATH do sistema.\n\nBaixe em: https://github.com/Genymobile/scrcpy")
+            self.mirror_log.log_message("scrcpy não encontrado no sistema.", "error")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao iniciar scrcpy: {e}")
+            self.mirror_log.log_message(f"Erro ao iniciar scrcpy: {e}", "error")
+            self.stop_mirroring()  # Limpar estado em caso de erro
 
     def stop_mirroring(self):
         self.is_mirroring = False
         self.mirror_button.setText("🖥️ Iniciar Segunda Tela")
         self.mirror_button.setStyleSheet("")
-        
+
+        # Parar scrcpy
         if self.mirroring_process:
-            self.mirroring_process.terminate()
+            try:
+                self.mirroring_process.terminate()
+                self.mirror_log.log_message("scrcpy encerrado.", "info")
+            except Exception as e:
+                self.mirror_log.log_message(f"Erro ao encerrar scrcpy: {e}", "error")
             self.mirroring_process = None
 
+        # Se estiver no modo extensão, remover monitor virtual
+        if self.mirror_mode_combo.currentIndex() == 2:
+            self.remove_virtual_display()
+    
     def mirroring_loop(self, resolution, fps):
         try:
             # Implementar lógica de espelhamento aqui
